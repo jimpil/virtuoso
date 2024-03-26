@@ -1,9 +1,12 @@
 (ns virtuoso.stress-test
   (:require [clojure.test :refer :all]
             [next.jdbc :as jdbc]
-            [virtuoso.core :as vt])
-  (:import (java.sql Connection)
-           (java.util.concurrent CancellationException Executors ScheduledExecutorService TimeUnit)))
+            [virtuoso.core :as vt]
+            [criterium.core :as criterium])
+  (:import (java.io Closeable)
+           (java.sql Connection)
+           (java.util.concurrent CancellationException Executors ScheduledExecutorService TimeUnit)
+           (javax.sql DataSource)))
 
 (set-agent-send-off-executor! (Executors/newVirtualThreadPerTaskExecutor))
 (alter-var-root #'jdbc/get-datasource (fn [_] (constantly :mock/datasource)))
@@ -15,7 +18,8 @@
 (def logs (agent ""))
 (def duration-minutes 5)
 (def concurrency 100)
-(def ^ScheduledExecutorService scheduled-exec (Executors/newSingleThreadScheduledExecutor))
+(def ^ScheduledExecutorService scheduled-exec
+  (Executors/newSingleThreadScheduledExecutor))
 (defn schedule-stop! [^Runnable stop-fn]
   (.schedule scheduled-exec stop-fn ^long duration-minutes TimeUnit/MINUTES))
 
@@ -36,8 +40,24 @@
                      doall)]
     (schedule-stop! (partial run! future-cancel futures))
     (try (run! deref futures) ;; block until all futures have been interrupted
-         (catch CancellationException _ :done))
-    )
-  )
+         (catch CancellationException _
+           (.close ^Closeable ds)))))
 
+(def vt-ds
+  (vt/datasource nil {:pool-size 5
+                      :connection-timeout -1
+                      ;:max-lifetime 5000
+                      ;:idle-timeout 2000
+                      :log-fn (fn [& args] (send-off logs (fn [s] (apply println args) s)) nil)}))
 
+(def hikari-ds
+  (hikari-cp.core/make-datasource
+    {}))
+
+(defn on-single-thread
+  [^DataSource ds]
+  (criterium/quick-bench ;; Execution time mean : 2.906309 ns
+    #(with-open [conn (.getConnection ds)]
+       (send-off logs println (.unwrap conn nil))
+       ;(println (.unwrap conn nil))
+       )))

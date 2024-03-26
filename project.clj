@@ -10,5 +10,6 @@
   :repl-options {:init-ns virtuoso.core}
   :profiles
   {:dev
-   {:dependencies [[criterium "0.4.6"]]}}
+   {:dependencies [[criterium "0.4.6"]
+                   [hikari-cp "3.0.1"]]}}
   )

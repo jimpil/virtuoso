@@ -77,17 +77,17 @@
                                 {:conn conn})
                         (and (not (.isClosed conn))
                              (.close ^Connection (.unwrap conn nil)))))
-                    (let [created-at (.getCreatedAt conn)
-                          alive      (.until created-at (Instant/now) ChronoUnit/MILLIS)
-                          diff       (unchecked-subtract max-lifetime alive)]
-                      (if (>= alive max-lifetime)
+                    (let [created-at (.getCreatedAt conn) ;; may return nil
+                          alive      (some-> created-at (.until (Instant/now) ChronoUnit/MILLIS))
+                          diff       (some->> alive (unchecked-subtract max-lifetime))]
+                      (if (some-> alive (>= max-lifetime))
                         ;; replenish the connection
                         (do (log-fn "Max lifetime exceeded!"
                                     {:conn conn
                                      :exceeded-by diff
                                      :alive-for alive})
                             (recur conn true ds-closed?))
-                        (let [fut (ensure-max-lifetime! exec diff t log-fn)
+                        (let [fut (when diff (ensure-max-lifetime! exec diff t log-fn))
                               replenish?
                               (try
                                 (or (Thread/interrupted) ;; bail out early (clears interrupt flag)
@@ -107,7 +107,7 @@
                                           {:conn conn})
                                   true)
                                 (finally
-                                  (future-cancel fut)))]
+                                  (some-> fut future-cancel)))]
                           (recur conn replenish? ds-closed?))))))))
             (reusable-conn ds opts)
             false
