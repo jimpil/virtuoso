@@ -72,7 +72,8 @@
             (recur
               (unchecked-inc i)
               (do  ;; connection-timeout
-                (log-fn "Creating non-reusable connection (slow path)!" {})
+                (log-fn "Creating non-reusable connection (slow path)!"
+                        {:retry i})
                 (jdbc/get-connection ds opts)))
 
             (.isClosed conn) ;; better safe than sorry
