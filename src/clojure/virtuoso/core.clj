@@ -69,9 +69,11 @@
               (SQLException. "Datasource has been closed!"))
 
             (nil? conn)
-            (do  ;; connection-timeout
-              (log-fn "Creating non-reusable connection (slow path)!" {})
-              (jdbc/get-connection ds opts))
+            (recur
+              (unchecked-inc i)
+              (do  ;; connection-timeout
+                (log-fn "Creating non-reusable connection (slow path)!" {})
+                (jdbc/get-connection ds opts)))
 
             (.isClosed conn) ;; better safe than sorry
             (do ;; somehow the underlying connection was closed (OS/driver?)
