@@ -92,12 +92,10 @@ There is none! `HikariCP` has proven that this is an anti-pattern.
 
 ## JDBC integration
 
-There is none! `virtuoso` relies on `next.jdbc`, for creating the initial DataSource (from your db-spec),
-and for creating physical connections from it (when needed). In other words, what `vt/make-datasource` creates 
-the *original* datasource (per `(jdbc/get-datasource db-spec)`), and returns a wrapper. Internally, that wrapper 
-uses instances of `ReusableConnection`, which in-turn wrap connections created via `(jdbc/get-connection original-ds opts)`.
-
-There is none! `HikariCP` has proven that this is an anti-pattern.
+There is none! `virtuoso` relies on `next.jdbc`, for creating the *initial* DataSource (from your db-spec),
+and for creating physical connections from that (when needed). In other words, what `vt/make-datasource` creates 
+the *initial* datasource (per `(jdbc/get-datasource db-spec)`), and returns a wrapper. Internally, that wrapper 
+uses instances of `ReusableConnection`, which in-turn wrap connections created via `(jdbc/get-connection initial-ds opts)`.
 
 ## Performance
 
@@ -119,10 +117,14 @@ Refer to `stress-test.clj` for how these numbers were calculated (per `quick-ben
 My best guess is that micro-benchmarks like these, only exercise the *happy-path*, and for `virtuoso`, 
 this boils down to literally 4 operations (per iteration):
 
-- `Semaphore.acquire()` (succeeds immediately unless connection is busy)
-- `LinkedTransferQueue.tryTransfer()` (succeeds immediately unless there are no consumers)
-- `Delay.get` (succeeds immediately unless it's the very first call)
-- `Semaphore.release()` (via `ReusableConnection.close()`)
+- `Semaphore.acquire()` - succeeds immediately (unless connection is busy)
+- `LinkedTransferQueue.tryTransfer()` - succeeds immediately (unless there are no consumers)
+- `Delay.get` - succeeds immediately (unless it's the very first call)
+- `Semaphore.release()` - via `ReusableConnection.close()`
+
+You can see that, in a single-threaded benchmark, the above calls happen in order, so there is no 
+contention or blocking anywhere. Of course, in a more realistic/multi-threaded situation the numbers won't be the same,
+but the single-threaded benchmark does demonstrate that all this extra wrapping costs very little.
 
 ## License
 
