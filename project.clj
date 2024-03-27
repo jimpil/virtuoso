@@ -5,7 +5,7 @@
             :url "https://www.eclipse.org/legal/epl-2.0/"}
   :source-paths      ["src/clojure"]
   :java-source-paths ["src/java"]
-  :dependencies [[org.clojure/clojure "1.12.0-alpha6"]
+  :dependencies [[org.clojure/clojure "1.12.0-alpha9"]
                  [com.github.seancorfield/next.jdbc "1.3.925"]]
   :repl-options {:init-ns virtuoso.core}
   :profiles

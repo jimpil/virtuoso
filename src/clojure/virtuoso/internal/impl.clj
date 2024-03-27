@@ -43,7 +43,7 @@
          validation-timeout 5000
          log-fn noop}
     :as opts}]
-  (let [validation-timeout (long (/ validation-timeout 1000))
+  (let [validation-timeout (long (/ validation-timeout 1000)) ;; need this in seconds
         exec (->> (Thread/ofVirtual)
                   (.factory)
                   (ScheduledThreadPoolExecutor. 1))]

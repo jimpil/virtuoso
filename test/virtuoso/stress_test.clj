@@ -2,7 +2,8 @@
   (:require [clojure.test :refer :all]
             [next.jdbc :as jdbc]
             [virtuoso.core :as vt]
-            [criterium.core :as criterium])
+            [criterium.core :as criterium]
+            [hikari-cp.core])
   (:import (java.io Closeable)
            (java.sql Connection)
            (java.util.concurrent CancellationException Executors ScheduledExecutorService TimeUnit)
@@ -10,12 +11,16 @@
 
 (set-agent-send-off-executor! (Executors/newVirtualThreadPerTaskExecutor))
 (alter-var-root #'jdbc/get-datasource (fn [_] (constantly :mock/datasource)))
-(alter-var-root #'jdbc/get-connection (fn [_] (constantly (reify Connection
-                                                            (isClosed [_] false)
-                                                            (isValid [_ _] true)
-                                                            (unwrap [_ _] :new)
-                                                            (close [_] nil)))))
 (def logs (agent ""))
+(alter-var-root #'jdbc/get-connection (fn [_]
+                                        (fn [_ _]
+                                          (reify Connection
+                                            (isClosed [_] false)
+                                            (isValid [_ _] (> (rand) 0.5))
+                                            (unwrap [_ _] :new)
+                                            (close [_]
+                                              (send-off logs println "TERMINATING!"))))))
+
 (def duration-minutes 5)
 (def concurrency 100)
 (def ^ScheduledExecutorService scheduled-exec
@@ -24,10 +29,10 @@
   (.schedule scheduled-exec stop-fn ^long duration-minutes TimeUnit/MINUTES))
 
 (defn start! []
-  (let [ds (vt/datasource nil {:maximum-pool-size 5
-                               :max-lifetime 60000
-                               :idle-timeout 2000
-                               :log-fn (fn [& args] (send-off logs (fn [s] (apply println args) s)) nil)})
+  (let [ds (vt/make-datasource nil {:maximum-pool-size 5
+                               :max-lifetime           60000
+                               :idle-timeout           1000
+                               :log-fn                 (fn [& args] (send-off logs (fn [s] (apply println args) s)) nil)})
         futures (->> #(future
                         (while (not (Thread/interrupted))
                           (let [^long ms (inc (rand-int 2000))]
@@ -43,21 +48,15 @@
          (catch CancellationException _
            (.close ^Closeable ds)))))
 
-(def vt-ds
-  (vt/datasource nil {:pool-size 5
-                      :connection-timeout -1
-                      ;:max-lifetime 5000
-                      ;:idle-timeout 2000
-                      :log-fn (fn [& args] (send-off logs (fn [s] (apply println args) s)) nil)}))
-
-(def hikari-ds
-  (hikari-cp.core/make-datasource
-    {}))
-
-(defn on-single-thread
-  [^DataSource ds]
-  (criterium/quick-bench ;; Execution time mean : 2.906309 ns
-    #(with-open [conn (.getConnection ds)]
-       (send-off logs println (.unwrap conn nil))
-       ;(println (.unwrap conn nil))
-       )))
+(defn quick-bench! []
+  (with-open [ds (vt/make-datasource nil {:pool-size     5
+                                          :connection-timeout -1
+                                          ;:max-lifetime 5000
+                                          ;:idle-timeout 2000
+                                          ;:log-fn (fn [& args] (send-off logs (fn [s] (apply println args) s)) nil)
+                                          })]
+    (criterium/quick-bench ;; Execution time mean : 7.980545 ns
+      #(with-open [conn (.getConnection ds)]
+         (.unwrap conn nil)
+         ;(println (.unwrap conn nil))
+         ))))

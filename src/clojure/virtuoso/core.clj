@@ -7,13 +7,14 @@
             [java.util.concurrent LinkedTransferQueue TimeUnit]
             [virtuoso.internal ReusableConnection]))
 
-(defn datasource
+(defn make-datasource
   "Returns a `java.sql.DataSource` wrapping `(jdbc/get-datasource db-spec)`
    which reuses connections. It does this by spawning virtual-threads, all
    waiting to `TransferQueue.tryTransfer` to the first available consumer.
    In other words, there is a 'pool' of virtual-threads that are
    synchronized/coordinated via a `LinkedTransferQueue`.
-   Options (can) include the following keys:
+   Options are expected per `(jdbc/get-connection this opts)`,
+   but can include the following (pooling-related) keys:
 
    - `:pool-size` => how many threads to start - there is no minimum/maximum as
    the 'pool' can scale down to zero w/o affecting readiness. Defaults to 10.
@@ -31,41 +32,16 @@
    (reusable) connection to some consumer. Defaults to 600,000 (i.e. 10 minutes).
 
    - `:max-lifetime` => how long (in ms) a (reusable) connection is allowed to live for.
-   Defaults to 1,800,000 (i.e. 30 minutes). Note that, the 'timer' doesn't starts ticking
+   Defaults to 1,800,000 (i.e. 30 minutes). Note that, the 'timer' doesn't start ticking
    until the underlying (physical) connection is realised (i.e. created).
 
    - `:validation-timeout` => how long (in ms) a validation check (per `Connection.isValid(int)`)
    is allowed to go for (before returning false), which can only be triggered via `:idle-timeout`.
-   In other words, validation checks are performed only after idle timeouts. Defaults to 5000.
+   In other words, validation checks are performed only after idle timeouts. Defaults to 5,000.
 
    - `:log-fn` => a 2-arg (message/data)/non-blocking/nil-returning function to be called
    every time something interesting (reusing/replenishing/closing/timeouts etc) happens.
-   Defaults to `(constantly nil)`.
-
-   The premise is that it is simpler/cheaper to simply block
-   virtual-threads, than trying to maintain an auto-scalable/shrinkable
-   pool, and the numbers seem to back that up.
-
-
-
-   This DataSource is able
-   of giving you back a physical `Connection` in just over 3ns,
-   which in terms of ops/ms, is more than double of what HikariCP claims.
-   The options stay largely the same with HikariCP, except `:minimum-idle`,
-   which simply doesn't make sense. In this design, during periods of
-   inactivity, the 'pool' will scale-down to essentially zero w/o affecting
-   readiness - i.e. all threads will be blocked, waiting to server someone!
-   Similarly, the whole 'keep-alive' mechanism is approached differently.
-   Instead of separately scheduled validity checks (and the complications
-   this entails), like HikariCP does, this happens every time a transfer fails
-   - never while waiting (i.e. in the pool). This may(?) become a reason for
-   shorter `:max-lifetime` on some systems/drivers. Finally, `connection-timeout`
-   does mean the same thing as in HikariCP, but can be zero or negative (to disable),
-   and if exceeded will not throw, but rather, will create a new (non-reusable)
-   connection from the <db-spec> (to accommodate spikes). A 2-arg (message, data)
-   nil-returning/non-blocking <log-fn> can optionally be provided. It will be called
-   whenever a reusable connection is either closed/(re)used, or a non-reusable
-   connection is created (i.e. <connection-timeout> elapsed)."
+   Defaults to `(constantly nil)`."
   ^DataSource
   [db-spec {:keys [pool-size ^long connection-timeout log-fn]
             :or {connection-timeout 30000
