@@ -40,7 +40,7 @@
                               (Thread/sleep ms)
                               (send-off logs (fn [s] (doto s (println "done - slept for" ms \- (java.time.Instant/now)))))
                               (send-off logs println "--releasing")))
-                          (Thread/sleep ^long (rand-int 1000))))
+                          (Thread/sleep 1000)))
                      (repeatedly concurrency)
                      doall)]
     (schedule-stop! (partial run! future-cancel futures))
@@ -49,14 +49,22 @@
            (.close ^Closeable ds)))))
 
 (defn quick-bench! []
-  (with-open [ds (vt/make-datasource nil {:pool-size     5
-                                          :connection-timeout -1
-                                          ;:max-lifetime 5000
-                                          ;:idle-timeout 2000
-                                          ;:log-fn (fn [& args] (send-off logs (fn [s] (apply println args) s)) nil)
-                                          })]
+  (with-open [^DataSource ds (vt/make-datasource
+                               nil {:pool-size 10
+                                    :connection-timeout -1
+                                    ;:max-lifetime 5000
+                                    ;:idle-timeout 2000
+                                    ;:log-fn (fn [& args] (send-off logs (fn [s] (apply println args) s)) nil)
+                                    })]
+    #_(->> (range 32)
+         (pmap (fn))
+
+         )
+
+
     (criterium/quick-bench ;; Execution time mean : 7.980545 ns
-      #(with-open [conn (.getConnection ds)]
-         (.unwrap conn nil)
+      (with-open [conn (.getConnection ds)]
+        conn
+        ;(.unwrap conn nil)
          ;(println (.unwrap conn nil))
          ))))

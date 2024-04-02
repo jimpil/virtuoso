@@ -40,11 +40,10 @@
            log-fn]
     :or {max-lifetime 1800000
          idle-timeout 600000
-         validation-timeout 5000
+         validation-timeout 5 ;; seconds
          log-fn noop}
     :as opts}]
-  (let [validation-timeout (long (/ validation-timeout 1000)) ;; need this in seconds
-        exec (->> (Thread/ofVirtual)
+  (let [exec (->> (Thread/ofVirtual)
                   (.factory)
                   (ScheduledThreadPoolExecutor. 1))]
     (-> (Thread/ofVirtual)
@@ -98,7 +97,7 @@
                                       (not (.tryTransfer ltq [conn thread-index] idle-timeout TimeUnit/MILLISECONDS))
                                       (do (log-fn "Idle timeout - checking validity"
                                                   {:conn conn})
-                                          ;; tranfer failed - release manually to avoid deadlock!
+                                          ;; transfer failed - release manually to avoid deadlock!
                                           (.close conn)
                                           (not (.isValid conn validation-timeout)))))
                                 (catch InterruptedException _

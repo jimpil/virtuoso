@@ -1,11 +1,12 @@
 (ns virtuoso.core
   (:require [next.jdbc :as jdbc]
             [virtuoso.internal.impl :as internal])
-  (:import  [java.io Closeable]
-            [java.sql SQLException SQLFeatureNotSupportedException]
-            [javax.sql DataSource]
-            [java.util.concurrent LinkedTransferQueue TimeUnit]
-            [virtuoso.internal ReusableConnection]))
+  (:import [java.io Closeable]
+           (java.net InetAddress)
+           [java.sql SQLException SQLFeatureNotSupportedException]
+           [javax.sql DataSource]
+           [java.util.concurrent LinkedTransferQueue ScheduledThreadPoolExecutor TimeUnit]
+           [virtuoso.internal ReusableConnection]))
 
 (defn make-datasource
   "Returns a `java.sql.DataSource` wrapping `(jdbc/get-datasource db-spec)`
@@ -43,12 +44,23 @@
    every time something interesting (reusing/replenishing/closing/timeouts etc) happens.
    Defaults to `(constantly nil)`."
   ^DataSource
-  [db-spec {:keys [pool-size ^long connection-timeout log-fn]
+  [db-spec {:keys [pool-size
+                   ^long connection-timeout
+                   validation-timeout
+                   log-fn
+                   throw-on-connection-timeout?
+                   validate-on-checkout?]
             :or {connection-timeout 30000
+                 validation-timeout 5000
+                 throw-on-connection-timeout? true
+                 validate-on-checkout? true
                  pool-size 10
                  log-fn internal/noop}
             :as opts}]
-  (let [ds      (jdbc/get-datasource db-spec)
+  (let [validation-timeout (long (/ validation-timeout 1000))
+        opts    (assoc opts :validation-timeout validation-timeout)
+        address (InetAddress/getByName (:host db-spec))
+        ds      (jdbc/get-datasource db-spec)
         ltq     (LinkedTransferQueue.)
         closed? (volatile! false)
         threads (mapv
@@ -57,8 +69,7 @@
         take! (if (pos? connection-timeout)
                 #(.poll ltq connection-timeout TimeUnit/MILLISECONDS)
                 #(.take ltq))]
-    (reify
-      DataSource
+    (reify DataSource
       (getConnection [_]
         (loop [i 0
                [^ReusableConnection conn
@@ -66,23 +77,34 @@
           (cond
             @closed?
             (throw
-              (SQLException. "Datasource has been closed!"))
+              (SQLException. "Datasource is closed!"))
 
-            (nil? conn)
-            (recur
-              (unchecked-inc i)
-              (do  ;; connection-timeout
+            (nil? conn) ;; connection-timeout
+            (if (true? throw-on-connection-timeout?)
+              (throw
+                (SQLException. "Connection-timeout! Aborting..."))
+              (do
                 (log-fn "Creating non-reusable connection (slow path)!"
                         {:retry i})
-                (jdbc/get-connection ds opts)))
+                (recur (unchecked-inc i) (jdbc/get-connection ds opts))))
 
-            (.isClosed conn) ;; better safe than sorry
-            (do ;; somehow the underlying connection was closed (OS/driver?)
-              (log-fn "Got a closed connection - retrying from different producer!"
+            (if (true? validate-on-checkout?)
+              (not (.isValid conn validation-timeout))
+              (.isClosed conn)) ;; better safe than sorry
+            (let [network-ok? (.isReachable address 5000)] ;; somehow the underlying connection was closed (OS/driver?)
+              (log-fn "Got an invalid or closed connection!"
                       {:conn conn
+                       :host-reachable? network-ok?
                        :retry i})
               (internal/interrupt-thread! (threads thread-index)) ;; trigger replenish
-              (recur (unchecked-inc i) (take!)))
+              (if network-ok?
+                (do (log-fn "Retrying from a different producer..."
+                            {:conn conn
+                             :host-reachable? network-ok?
+                             :retry i})
+                    (recur (unchecked-inc i) (take!)))
+                (throw
+                  (SQLException. "DB host is not reachable!"))))
             ;; happy path (i.e. reusing connection)
             :else conn)))
       (getConnection [_ _ _]

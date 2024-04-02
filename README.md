@@ -100,31 +100,17 @@ uses instances of `ReusableConnection`, which in-turn wrap connections created v
 ## Performance
 
 I didn't start this project with performance in mind - all I was aiming for was a *simpler* solution/architecture.
-That said, I was pleasantly surprised by the numbers.
+That said, I was pleasantly surprised by the numbers (1µs/cycle). Refer to `stress-test.clj` for the micro-benchmark 
+(per `quick-bench!`). 
 
-- `HikariCP` claims 50,273 connection-cycles/ms (~ 19.9 ns/cycle) on an Intel Core i7-3770 CPU @ 3.40GHz.
-- `virtuoso` can do 185,127 connection-cycles/ms (~ 5.4 ns/cycle) on an Intel Core i7-4770HQ CPU @ 2.80GHz (according to `criterium`).
-
-|          | HikariCP | virtuoso |
-|----------|--------|----------|
-| size(kb) | 130    | 19       | 
-| ops/ms   | 50,273 | 185,127  |
-
-Refer to `stress-test.clj` for how these numbers were calculated (per `quick-bench!`). 
-
-### How is this possible?
-
-My best guess is that micro-benchmarks like these, only exercise the *happy-path*, and for `virtuoso`, 
-this boils down to literally 4 operations (per iteration):
+Long story short, the *happy-path*, boils down to literally 5 operations:
 
 - `Semaphore.acquire()` - succeeds immediately (unless connection is busy)
 - `LinkedTransferQueue.tryTransfer()` - succeeds immediately (unless there are no consumers)
-- `Delay.get` - succeeds immediately (unless it's the very first call)
+- `Delay.get()` - succeeds immediately (unless it's the very first use of the `ReusableConnection`)
+- `Connection.isValid() or .isClosed()` - depending on `:validate-on-checkout?`
 - `Semaphore.release()` - via `ReusableConnection.close()`
 
-You can see that, in a single-threaded benchmark, the above calls happen in order, so there is no 
-contention or blocking anywhere. Of course, in a more realistic/multi-threaded situation the numbers won't be the same,
-but the single-threaded benchmark does demonstrate that all this extra wrapping costs very little.
 
 ## License
 
