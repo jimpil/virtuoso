@@ -5,7 +5,7 @@
            (java.net InetAddress)
            [java.sql SQLException SQLFeatureNotSupportedException]
            [javax.sql DataSource]
-           [java.util.concurrent LinkedTransferQueue ScheduledThreadPoolExecutor TimeUnit]
+           [java.util.concurrent LinkedTransferQueue TimeUnit]
            [virtuoso.internal ReusableConnection]))
 
 (defn make-datasource
